@@ -1,7 +1,8 @@
 services:
   app:
-    build: .
-
+    build: 
+      context: .
+      target: development
     container_name: docker-op
 
     ports:

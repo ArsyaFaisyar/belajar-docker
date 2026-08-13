@@ -42,7 +42,8 @@ jobs:
         run: docker compose -f docker.compose-test.yml down -v
 
       - name: Build production image
-          run: >
+        run: >
             docker build
             --target production
             --tag bank-api:${{github.sha}}
+            .

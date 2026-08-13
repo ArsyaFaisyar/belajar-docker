@@ -1,0 +1,48 @@
+name: Bank API Pipeline
+on:
+  push:
+    branches:
+      -main
+      -develop
+    pull_request:
+      branches:
+        -main
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test API
+    runs-on: ubuntu-latest
+
+  concurrency:
+    group: ci-${{github.workflow}}--${{github.ref}}  
+    cancel-in-progress: true
+
+    steps:
+      - name: Checkout Repository
+        uses: action/checkout@v6
+
+      - name: Show Docker Versions
+        run: |
+         docker --version 
+         docker compose version
+
+      - name: Run intergration Test
+        run : >
+          docker compose
+          -f docker-compose-test.yml
+          up
+          --build
+          --abort-on-container-exit
+          --exit-code-from test
+
+      - name: Cleanup test containers
+          if: always()
+          run: docker compose -f docker.compose-test.yml down -v
+
+      - name: Build production image
+          run: >
+            docker build
+            --target production
+            --tag bank-api:${{github.sha}}

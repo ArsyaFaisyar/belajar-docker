@@ -38,8 +38,8 @@ jobs:
           --exit-code-from test
 
       - name: Cleanup test containers
-          if: always()
-          run: docker compose -f docker.compose-test.yml down -v
+        if: always()
+        run: docker compose -f docker.compose-test.yml down -v
 
       - name: Build production image
           run: >

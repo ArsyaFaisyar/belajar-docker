@@ -127,7 +127,7 @@ jobs:
           ssh -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$VPS_USER@$VPS_HOST" << 'EOF'
-            cd /opt/bank-api || exit 1
+            cd /opt/bank-api/belajar-docker || exit 1
 
             git pull --ff-only origin main || echo "Tidak ada update kode"
 

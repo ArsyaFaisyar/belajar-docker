@@ -19,7 +19,7 @@ const getNasabahById = asycHandler(async (req, res) => {
   if (result.rowCount == 0) {
     return res.status(404).json({
       status: "fail",
-      message: "Nasabah tidak ditemukan!",
+      message: "Nasabah tidak di check",
     });
   }
 

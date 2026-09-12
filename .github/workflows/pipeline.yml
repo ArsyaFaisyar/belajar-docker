@@ -1,35 +1,37 @@
 name: Bank API Pipeline
+
 on:
   push:
-    branches: -main
-      -develop
-    pull_request:
-      branches: -main
-permissions:
-  contents: read
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
 
 concurrency:
-  group: ci-${{github.workflow}}--${{github.ref}}
+  group: pipeline-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   test:
     name: Test API
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
-      - name: Checkout Repository
-        uses: action/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v6
 
-      - name: Show Docker Versions
-        run: |
-          docker --version 
-          docker compose version
-
-      - name: Run intergration Test
+      - name: Run integration tests
         run: >
           docker compose
-          -f docker-compose-test.yml
+          -f docker-compose.test.yml
           up
           --build
           --abort-on-container-exit
@@ -37,11 +39,133 @@ jobs:
 
       - name: Cleanup test containers
         if: always()
-        run: docker compose -f docker.compose-test.yml down -v
+        run: docker compose -f docker-compose.test.yml down -v
 
       - name: Build production image
         run: >
           docker build
           --target production
-          --tag bank-api:${{github.sha}}
+          --tag bank-api:${{ github.sha }}
           .
+
+  publish:
+    name: Publish Docker Image
+    runs-on: ubuntu-latest
+    needs:
+      - test
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image tags and labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ github.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push production image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs:
+      - publish
+    environment:
+      name: production
+      url: http://${{ secrets.VPS_HOST }}:3060
+    permissions:
+      contents: read
+    env:
+      DEPLOY_IMAGE: >-
+        ghcr.io/${{ github.repository }}:${{ github.sha }}
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+
+    steps:
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          # Setup SSH directory
+          install -m 700 -d "$HOME/.ssh"
+          
+          # Write private key
+          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          
+          # Write known hosts
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy to VPS
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" << 'EOF'
+            cd /opt/bank-api || exit 1
+            
+            # Pull latest code (untuk update compose file jika ada)
+            git pull --ff-only origin main || echo "Tidak ada update kode"
+            
+            # Pull image baru
+            APP_IMAGE='$DEPLOY_IMAGE' \
+            docker compose -f compose.production.yml pull app
+            
+            # Run container baru
+            APP_IMAGE='$DEPLOY_IMAGE' \
+            docker compose -f compose.production.yml up -d --remove-orphans
+            
+            # Hapus image lama
+            docker image prune -f
+          EOF
+
+      - name: Verify application health
+        run: |
+          MAX_RETRIES=12
+          RETRY_INTERVAL=5
+          
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "Health check attempt $attempt/$MAX_RETRIES"
+            
+            if curl --fail --silent --max-time 5 \
+              "http://${{ secrets.VPS_HOST }}:3060/health" > /dev/null; then
+              echo "===>Deployment berhasil! Aplikasi aman.<==="
+              exit 0
+            fi
+            
+            echo "Menunggu aplikasi siap..."
+            sleep $RETRY_INTERVAL
+          done
+          
+          echo "===>Health check gagal setelah $MAX_RETRIES percobaan LEMBUR IKI MAS TANDA E<==="
+          exit 1

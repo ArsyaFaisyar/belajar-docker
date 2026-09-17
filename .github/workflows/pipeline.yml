@@ -41,13 +41,6 @@ jobs:
         if: always()
         run: docker compose -f docker-compose-test.yml down -v
 
-      - name: Build production image
-        run: >
-          docker build
-          --target production
-          --tag bank-api:${{ github.sha }}
-          .
-
   publish:
     name: Publish Docker Image
     runs-on: ubuntu-latest
@@ -105,8 +98,7 @@ jobs:
     permissions:
       contents: read
     env:
-      DEPLOY_IMAGE: >-
-        ghcr.io/${{ github.repository }}:${{ github.sha }}
+      DEPLOY_IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
 
@@ -126,15 +118,15 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$VPS_USER@$VPS_HOST" << 'EOF'
+            "$VPS_USER@$VPS_HOST" EOF
             cd /opt/bank-api/belajar-docker || exit 1
 
             git pull --ff-only origin main || echo "Tidak ada update kode"
 
-            APP_IMAGE='$DEPLOY_IMAGE' \
+            APP_IMAGE="${{ env.DEPLOY_IMAGE }}" \
             docker compose -f compose.production.yml pull app
 
-            APP_IMAGE='$DEPLOY_IMAGE' \
+            APP_IMAGE="${{ env.DEPLOY_IMAGE }}" \
             docker compose -f compose.production.yml up -d --remove-orphans
 
             docker image prune -f

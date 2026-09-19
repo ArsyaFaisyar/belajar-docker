@@ -149,7 +149,7 @@ jobs:
             echo "Health check attempt $attempt/$MAX_RETRIES"
 
             if curl --fail --silent --max-time 5 \
-              "http://${{ secrets.VPS_HOST }}:3060/health" > /dev/null; then
+              "http://localhost:3060/health" > /dev/null; then
               echo "Deployment berhasil. Aplikasi aman."
               exit 0
             fi

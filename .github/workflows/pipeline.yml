@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - develop
+
   pull_request:
     branches:
       - main
@@ -15,52 +16,69 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: arsyafaisyar/belajar-docker
 
 jobs:
+
+  # ============================================================
+  # TEST
+  # ============================================================
   test:
     name: Test API
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v6
 
       - name: Run integration tests
-        run: >
-          docker compose
-          -f docker-compose-test.yml
-          up
-          --build
-          --abort-on-container-exit
-          --exit-code-from test
+        run: |
+          docker compose \
+            -f docker-compose-test.yml \
+            up \
+            --build \
+            --abort-on-container-exit \
+            --exit-code-from test
 
       - name: Cleanup test containers
         if: always()
-        run: docker compose -f docker-compose-test.yml down -v
+        run: |
+          docker compose \
+            -f docker-compose-test.yml \
+            down -v
 
       - name: Build production image
-        run: >
-          docker build
-          --target production
-          --tag bank-api:${{ github.sha }}
-          .
+        run: |
+          docker build \
+            --target production \
+            --tag bank-api:${{ github.sha }} \
+            .
 
+
+  # ============================================================
+  # PUBLISH
+  # ============================================================
   publish:
     name: Publish Docker Image
     runs-on: ubuntu-latest
+
     needs:
       - test
-    if: >
+
+    if: |
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
+
     permissions:
       contents: read
       packages: write
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v6
 
@@ -95,75 +113,146 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+
+  # ============================================================
+  # DEPLOY
+  # ============================================================
   deploy:
     name: Deploy to Production
     runs-on: ubuntu-latest
+
     needs:
       - publish
+
     environment:
       name: production
+
     permissions:
       contents: read
+
     env:
-      DEPLOY_IMAGE: >-
-        ghcr.io/${{ github.repository }}:${{ github.sha }}
+      DEPLOY_IMAGE: ghcr.io/arsyafaisyar/belajar-docker:${{ github.sha }}
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
 
     steps:
+
+      # --------------------------------------------------------
+      # SSH CONFIGURATION
+      # --------------------------------------------------------
       - name: Configure SSH
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+
         run: |
           install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/id_ed25519"
+
+          printf '%s\n' "$VPS_SSH_KEY" \
+            > "$HOME/.ssh/id_ed25519"
+
           chmod 600 "$HOME/.ssh/id_ed25519"
-          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+
+          printf '%s\n' "$VPS_KNOWN_HOSTS" \
+            > "$HOME/.ssh/known_hosts"
+
           chmod 600 "$HOME/.ssh/known_hosts"
 
+
+      # --------------------------------------------------------
+      # DEPLOY TO VPS
+      # --------------------------------------------------------
       - name: Deploy to VPS
         run: |
-          ssh -o StrictHostKeyChecking=accept-new \
+          ssh \
+            -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$VPS_USER@$VPS_HOST" \
             "DEPLOY_IMAGE='$DEPLOY_IMAGE' bash -s" << 'EOF'
 
             set -e
 
-            cd /opt/bank-api/belajar-docker || exit 1
+            echo "========================================"
+            echo "Starting deployment"
+            echo "========================================"
 
-            echo "Deploy image: $DEPLOY_IMAGE"
+            echo "Deploy image:"
+            echo "$DEPLOY_IMAGE"
 
-            git pull --ff-only origin main || echo "Tidak ada update kode"
+            cd /opt/bank-api/belajar-docker
+
+            echo ""
+            echo "Pulling latest repository..."
+            git pull --ff-only origin main || \
+              echo "Tidak ada update kode"
+
+            echo ""
+            echo "Pulling Docker image..."
 
             APP_IMAGE="$DEPLOY_IMAGE" \
-            docker compose -f compose.production.yml pull app
+              docker compose \
+              -f compose.production.yml \
+              pull app
+
+            echo ""
+            echo "Starting application..."
 
             APP_IMAGE="$DEPLOY_IMAGE" \
-            docker compose -f compose.production.yml up -d --remove-orphans
+              docker compose \
+              -f compose.production.yml \
+              up -d \
+              --remove-orphans
+
+            echo ""
+            echo "Container status..."
+
+            docker compose \
+              -f compose.production.yml \
+              ps
+
+            echo ""
+            echo "Cleaning unused images..."
 
             docker image prune -f
 
+            echo ""
+            echo "========================================"
+            echo "Deployment completed"
+            echo "========================================"
+
           EOF
 
+
+      # --------------------------------------------------------
+      # VERIFY HEALTH
+      # --------------------------------------------------------
       - name: Verify application health
         run: |
           MAX_RETRIES=12
           RETRY_INTERVAL=5
 
           for attempt in $(seq 1 $MAX_RETRIES); do
+
             echo "Health check attempt $attempt/$MAX_RETRIES"
 
-            if curl --fail --silent --max-time 5 \
-              "http://localhost:3060/health" > /dev/null; then
+            if ssh \
+              -o StrictHostKeyChecking=accept-new \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$VPS_USER@$VPS_HOST" \
+              "curl --fail --silent --max-time 5 http://localhost:3060/health > /dev/null"
+            then
+
               echo "Deployment berhasil. Aplikasi aman."
               exit 0
+
             fi
 
             echo "Menunggu aplikasi siap..."
+
             sleep $RETRY_INTERVAL
+
           done
 
-          echo "===>Health check gagal setelah $MAX_RETRIES percobaan LEMBUR IKI MAS TANDA E<==="
+          echo "Health check gagal setelah $MAX_RETRIES percobaan"
+
           exit 1

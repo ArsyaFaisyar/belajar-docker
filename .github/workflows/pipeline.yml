@@ -126,18 +126,25 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=accept-new \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$VPS_USER@$VPS_HOST" << 'EOF'
+            "$VPS_USER@$VPS_HOST" \
+            "DEPLOY_IMAGE='$DEPLOY_IMAGE' bash -s" << 'EOF'
+
+            set -e
+
             cd /opt/bank-api/belajar-docker || exit 1
+
+            echo "Deploy image: $DEPLOY_IMAGE"
 
             git pull --ff-only origin main || echo "Tidak ada update kode"
 
-            APP_IMAGE='$DEPLOY_IMAGE' \
+            APP_IMAGE="$DEPLOY_IMAGE" \
             docker compose -f compose.production.yml pull app
 
-            APP_IMAGE='$DEPLOY_IMAGE' \
+            APP_IMAGE="$DEPLOY_IMAGE" \
             docker compose -f compose.production.yml up -d --remove-orphans
 
             docker image prune -f
+
           EOF
 
       - name: Verify application health

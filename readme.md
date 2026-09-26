@@ -94,3 +94,6 @@ Yang berubah, ada di taahapan pengecekan health api
 
 disana kita ngecek health api, melalui alamat localhost, karena memang sedari awal API running, tetapi karena kita mendesain untuk cek dari alamat IP Server maka tidak dapat di akses, dan proses build jadi gagal
 
+> nanti jika memang sudah sampai ke tahap dimaan API sudah di consume, bisa config dlu di web server untuk sih APInya. lalu di bagian script ceknya tinggal di hit ke alamat API dan ednpointnya.
+
+Semangat Mas Internnya!, di tunggu kita kerja barengnya !

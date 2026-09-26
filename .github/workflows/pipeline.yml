@@ -1,3 +1,4 @@
+```yaml
 name: Bank API Pipeline
 
 on:
@@ -32,9 +33,16 @@ jobs:
 
     steps:
 
+      # --------------------------------------------------------
+      # CHECKOUT
+      # --------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v6
 
+
+      # --------------------------------------------------------
+      # INTEGRATION TEST
+      # --------------------------------------------------------
       - name: Run integration tests
         run: |
           docker compose \
@@ -44,6 +52,10 @@ jobs:
             --abort-on-container-exit \
             --exit-code-from test
 
+
+      # --------------------------------------------------------
+      # CLEANUP TEST
+      # --------------------------------------------------------
       - name: Cleanup test containers
         if: always()
         run: |
@@ -51,6 +63,10 @@ jobs:
             -f docker-compose-test.yml \
             down -v
 
+
+      # --------------------------------------------------------
+      # BUILD PRODUCTION IMAGE
+      # --------------------------------------------------------
       - name: Build production image
         run: |
           docker build \
@@ -79,9 +95,16 @@ jobs:
 
     steps:
 
+      # --------------------------------------------------------
+      # CHECKOUT
+      # --------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v6
 
+
+      # --------------------------------------------------------
+      # LOGIN GHCR
+      # --------------------------------------------------------
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -89,6 +112,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+
+      # --------------------------------------------------------
+      # GENERATE IMAGE TAGS
+      # --------------------------------------------------------
       - name: Generate image tags and labels
         id: meta
         uses: docker/metadata-action@v6
@@ -98,9 +125,17 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ github.sha }}
 
+
+      # --------------------------------------------------------
+      # SETUP BUILDX
+      # --------------------------------------------------------
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+
+      # --------------------------------------------------------
+      # BUILD & PUSH
+      # --------------------------------------------------------
       - name: Build and push production image
         id: push
         uses: docker/build-push-action@v7
@@ -108,8 +143,11 @@ jobs:
           context: .
           target: production
           push: true
+
           tags: ${{ steps.meta.outputs.tags }}
+
           labels: ${{ steps.meta.outputs.labels }}
+
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -132,14 +170,15 @@ jobs:
 
     env:
       DEPLOY_IMAGE: ghcr.io/arsyafaisyar/belajar-docker:${{ github.sha }}
+
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
 
     steps:
 
-      # --------------------------------------------------------
+      # ========================================================
       # SSH CONFIGURATION
-      # --------------------------------------------------------
+      # ========================================================
       - name: Configure SSH
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -159,9 +198,9 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
 
 
-      # --------------------------------------------------------
+      # ========================================================
       # DEPLOY TO VPS
-      # --------------------------------------------------------
+      # ========================================================
       - name: Deploy to VPS
         run: |
           ssh \
@@ -176,33 +215,76 @@ jobs:
             echo "Starting deployment"
             echo "========================================"
 
+            echo ""
             echo "Deploy image:"
             echo "$DEPLOY_IMAGE"
+
+            echo ""
+            echo "Changing directory..."
 
             cd /opt/bank-api/belajar-docker
 
             echo ""
+            echo "Current directory:"
+            pwd
+
+            # --------------------------------------------------
+            # SET APP IMAGE
+            # --------------------------------------------------
+            export APP_IMAGE="$DEPLOY_IMAGE"
+
+            echo ""
+            echo "APP_IMAGE:"
+            echo "$APP_IMAGE"
+
+
+            # --------------------------------------------------
+            # PULL LATEST REPOSITORY
+            # --------------------------------------------------
+            echo ""
             echo "Pulling latest repository..."
+
             git pull --ff-only origin main || \
               echo "Tidak ada update kode"
 
+
+            # --------------------------------------------------
+            # SHOW COMPOSE CONFIG
+            # --------------------------------------------------
+            echo ""
+            echo "Checking Docker Compose configuration..."
+
+            docker compose \
+              -f compose.production.yml \
+              config
+
+
+            # --------------------------------------------------
+            # PULL DOCKER IMAGE
+            # --------------------------------------------------
             echo ""
             echo "Pulling Docker image..."
 
-            APP_IMAGE="$DEPLOY_IMAGE" \
-              docker compose \
+            docker compose \
               -f compose.production.yml \
               pull app
 
+
+            # --------------------------------------------------
+            # START APPLICATION
+            # --------------------------------------------------
             echo ""
             echo "Starting application..."
 
-            APP_IMAGE="$DEPLOY_IMAGE" \
-              docker compose \
+            docker compose \
               -f compose.production.yml \
               up -d \
               --remove-orphans
 
+
+            # --------------------------------------------------
+            # CONTAINER STATUS
+            # --------------------------------------------------
             echo ""
             echo "Container status..."
 
@@ -210,11 +292,32 @@ jobs:
               -f compose.production.yml \
               ps
 
+
+            # --------------------------------------------------
+            # SHOW APP LOGS
+            # --------------------------------------------------
+            echo ""
+            echo "Application logs..."
+
+            docker compose \
+              -f compose.production.yml \
+              logs \
+              --tail=50 \
+              app
+
+
+            # --------------------------------------------------
+            # CLEAN UNUSED IMAGES
+            # --------------------------------------------------
             echo ""
             echo "Cleaning unused images..."
 
             docker image prune -f
 
+
+            # --------------------------------------------------
+            # DEPLOYMENT COMPLETED
+            # --------------------------------------------------
             echo ""
             echo "========================================"
             echo "Deployment completed"
@@ -223,16 +326,21 @@ jobs:
           EOF
 
 
-      # --------------------------------------------------------
+      # ========================================================
       # VERIFY HEALTH
-      # --------------------------------------------------------
+      # ========================================================
       - name: Verify application health
         run: |
           MAX_RETRIES=12
           RETRY_INTERVAL=5
 
+          echo "========================================"
+          echo "Starting health check"
+          echo "========================================"
+
           for attempt in $(seq 1 $MAX_RETRIES); do
 
+            echo ""
             echo "Health check attempt $attempt/$MAX_RETRIES"
 
             if ssh \
@@ -242,17 +350,24 @@ jobs:
               "curl --fail --silent --max-time 5 http://localhost:3060/health > /dev/null"
             then
 
-              echo "Deployment berhasil. Aplikasi aman."
+              echo ""
+              echo "========================================"
+              echo "Deployment berhasil."
+              echo "Health check berhasil."
+              echo "========================================"
+
               exit 0
 
             fi
 
-            echo "Menunggu aplikasi siap..."
+            echo "Aplikasi belum siap."
+            echo "Menunggu $RETRY_INTERVAL detik..."
 
             sleep $RETRY_INTERVAL
 
           done
 
-          echo "Health check gagal setelah $MAX_RETRIES percobaan"
-
-          exit 1
+          echo ""
+          echo "========================================"
+          echo "Health check gagal."
+          echo "========================================"

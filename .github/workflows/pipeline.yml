@@ -33,16 +33,9 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------------
-      # CHECKOUT
-      # --------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v6
 
-
-      # --------------------------------------------------------
-      # INTEGRATION TEST
-      # --------------------------------------------------------
       - name: Run integration tests
         run: |
           docker compose \
@@ -52,10 +45,6 @@ jobs:
             --abort-on-container-exit \
             --exit-code-from test
 
-
-      # --------------------------------------------------------
-      # CLEANUP TEST
-      # --------------------------------------------------------
       - name: Cleanup test containers
         if: always()
         run: |
@@ -63,10 +52,6 @@ jobs:
             -f docker-compose-test.yml \
             down -v
 
-
-      # --------------------------------------------------------
-      # BUILD PRODUCTION IMAGE
-      # --------------------------------------------------------
       - name: Build production image
         run: |
           docker build \
@@ -95,16 +80,9 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------------
-      # CHECKOUT
-      # --------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v6
 
-
-      # --------------------------------------------------------
-      # LOGIN GHCR
-      # --------------------------------------------------------
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
         with:
@@ -112,10 +90,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-
-      # --------------------------------------------------------
-      # GENERATE IMAGE TAGS
-      # --------------------------------------------------------
       - name: Generate image tags and labels
         id: meta
         uses: docker/metadata-action@v6
@@ -125,29 +99,17 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ github.sha }}
 
-
-      # --------------------------------------------------------
-      # SETUP BUILDX
-      # --------------------------------------------------------
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
-
-      # --------------------------------------------------------
-      # BUILD & PUSH
-      # --------------------------------------------------------
       - name: Build and push production image
-        id: push
         uses: docker/build-push-action@v7
         with:
           context: .
           target: production
           push: true
-
           tags: ${{ steps.meta.outputs.tags }}
-
           labels: ${{ steps.meta.outputs.labels }}
-
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -170,15 +132,14 @@ jobs:
 
     env:
       DEPLOY_IMAGE: ghcr.io/arsyafaisyar/belajar-docker:${{ github.sha }}
-
       VPS_HOST: ${{ secrets.VPS_HOST }}
       VPS_USER: ${{ secrets.VPS_USER }}
 
     steps:
 
-      # ========================================================
+      # --------------------------------------------------------
       # SSH CONFIGURATION
-      # ========================================================
+      # --------------------------------------------------------
       - name: Configure SSH
         env:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
@@ -198,9 +159,9 @@ jobs:
           chmod 600 "$HOME/.ssh/known_hosts"
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # DEPLOY TO VPS
-      # ========================================================
+      # --------------------------------------------------------
       - name: Deploy to VPS
         run: |
           ssh \
@@ -219,24 +180,18 @@ jobs:
             echo "Deploy image:"
             echo "$DEPLOY_IMAGE"
 
-            echo ""
-            echo "Changing directory..."
-
             cd /opt/bank-api/belajar-docker
 
             echo ""
             echo "Current directory:"
             pwd
 
-            # --------------------------------------------------
-            # SET APP IMAGE
-            # --------------------------------------------------
+            # Set Docker image yang akan digunakan
             export APP_IMAGE="$DEPLOY_IMAGE"
 
             echo ""
             echo "APP_IMAGE:"
             echo "$APP_IMAGE"
-
 
             # --------------------------------------------------
             # PULL LATEST REPOSITORY
@@ -247,9 +202,8 @@ jobs:
             git pull --ff-only origin main || \
               echo "Tidak ada update kode"
 
-
             # --------------------------------------------------
-            # SHOW COMPOSE CONFIG
+            # CHECK COMPOSE
             # --------------------------------------------------
             echo ""
             echo "Checking Docker Compose configuration..."
@@ -257,7 +211,6 @@ jobs:
             docker compose \
               -f compose.production.yml \
               config
-
 
             # --------------------------------------------------
             # PULL DOCKER IMAGE
@@ -268,7 +221,6 @@ jobs:
             docker compose \
               -f compose.production.yml \
               pull app
-
 
             # --------------------------------------------------
             # START APPLICATION
@@ -281,7 +233,6 @@ jobs:
               up -d \
               --remove-orphans
 
-
             # --------------------------------------------------
             # CONTAINER STATUS
             # --------------------------------------------------
@@ -292,9 +243,8 @@ jobs:
               -f compose.production.yml \
               ps
 
-
             # --------------------------------------------------
-            # SHOW APP LOGS
+            # APP LOGS
             # --------------------------------------------------
             echo ""
             echo "Application logs..."
@@ -305,7 +255,6 @@ jobs:
               --tail=50 \
               app
 
-
             # --------------------------------------------------
             # CLEAN UNUSED IMAGES
             # --------------------------------------------------
@@ -314,10 +263,6 @@ jobs:
 
             docker image prune -f
 
-
-            # --------------------------------------------------
-            # DEPLOYMENT COMPLETED
-            # --------------------------------------------------
             echo ""
             echo "========================================"
             echo "Deployment completed"
@@ -326,9 +271,9 @@ jobs:
           EOF
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # VERIFY HEALTH
-      # ========================================================
+      # --------------------------------------------------------
       - name: Verify application health
         run: |
           MAX_RETRIES=12
@@ -371,3 +316,5 @@ jobs:
           echo "========================================"
           echo "Health check gagal."
           echo "========================================"
+
+          exit 1
